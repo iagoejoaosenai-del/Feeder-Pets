@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pet Feeder Automático</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="css/pg.css">
+</head>
+<body>
+    <div class="paw-print" style="left: 10%; animation-delay: 0s;"><i class="fas fa-paw"></i></div>
+    <div class="paw-print" style="left: 30%; animation-delay: 3s;"><i class="fas fa-paw"></i></div>
+    <div class="paw-print" style="left: 50%; animation-delay: 6s;"><i class="fas fa-paw"></i></div>
+    <div class="paw-print" style="left: 70%; animation-delay: 9s;"><i class="fas fa-paw"></i></div>
+    <div class="paw-print" style="left: 90%; animation-delay: 12s;"><i class="fas fa-paw"></i></div>
+
+    <div class="container">
+        <div class="header">
+            <div class="paw-icon"><i class="fas fa-paw"></i></div>
+            <h1><i class="fas fa-bone"></i> Pet Feeder Automático</h1>
+            <p class="subtitle">Sistema Inteligente de Alimentação</p>
+        </div>
+
+        <div class="dashboard">
+            <!-- Card: Nível de Ração -->
+            <div class="card">
+                <div class="card-title">
+                    <i class="fas fa-fill-drip"></i>
+                    Nível de Ração
+                </div>
+                <div class="level-indicator">
+                    <div class="level-fill" id="levelFill" style="height: 70%;">
+                        <span id="levelText">Cheio</span>
+                    </div>
+                </div>
+                <div class="distance-display">
+                    <i class="fas fa-weight"></i>
+                    <span id="distanceValue">196</span> g
+                </div>
+                <div class="status-leds">
+                    <div class="led green active" id="greenLed"></div>
+                    <div class="led yellow" id="yellowLed"></div>
+                    <div class="led red" id="redLed"></div>
+                </div>
+            </div>
+
+            <!-- Card: Controle -->
+            <div class="card">
+                <div class="card-title">
+                    <i class="fas fa-utensils"></i>
+                    Controle de Alimentação
+                </div>
+                <div class="bowl-animation">
+                    <i class="fas fa-bowl-food"></i>
+                </div>
+                <button class="feed-button" id="feedButton" onclick="liberarRacao()">
+                    <i class="fas fa-hand-holding-heart"></i> Alimentar Pet
+                </button>
+                <div style="text-align: center;">
+                    <span class="connection-status online" id="connectionStatus">
+                        <i class="fas fa-wifi"></i> Online
+                    </span>
+                </div>
+
+                <!-- Seção de Agendamento -->
+                <div class="schedule-section">
+                    <h3 style="margin-bottom: 15px; color: #667eea;">
+                        <i class="fas fa-clock"></i> Agendamentos
+                    </h3>
+                    <div class="schedule-input">
+                        <input type="time" id="scheduleTime" placeholder="Horário">
+                        <button class="add-schedule-btn" onclick="adicionarAgendamento()">
+                            <i class="fas fa-plus"></i> Adicionar
+                        </button>
+                    </div>
+                    <div class="schedule-list" id="scheduleList">
+                        <p style="text-align: center; color: #999;">Nenhum agendamento</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Card: Histórico -->
+            <div class="card">
+                <div class="card-title">
+                    <i class="fas fa-history"></i>
+                    Histórico de Alimentação
+                </div>
+                <div class="history" id="historyList">
+                    <div class="history-item">
+                        <i class="fas fa-check-circle"></i>
+                        <span>Aguardando primeira alimentação...</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const FIREBASE_HOST = "https://pet-feeder-automatico-default-rtdb.firebaseio.com";
+        const FIREBASE_AUTH = "7z8Mfw1bmBkBzqbgu9xgA3N1DQ1e58MCSRQnohjD";
+
+        // Função para liberar ração
+        async function liberarRacao() {
+            const button = document.getElementById('feedButton');
+            button.classList.add('feeding');
+            button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Liberando...';
+            button.disabled = true;
+
+            try {
+                const response = await fetch(`${FIREBASE_HOST}/pet_feeder/comando_liberar.json?auth=${FIREBASE_AUTH}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: 'true',
+                    mode: 'cors'
+                });
+
+                if (response.ok) {
+                    setTimeout(() => {
+                        button.classList.remove('feeding');
+                        button.innerHTML = '<i class="fas fa-hand-holding-heart"></i> Alimentar Pet';
+                        button.disabled = false;
+                        carregarHistorico();
+                    }, 2000);
+                } else {
+                    throw new Error('Resposta não OK');
+                }
+            } catch (error) {
+                console.error('Erro ao liberar ração:', error);
+                button.classList.remove('feeding');
+                button.innerHTML = '<i class="fas fa-exclamation-triangle"></i> Erro';
+                setTimeout(() => {
+                    button.innerHTML = '<i class="fas fa-hand-holding-heart"></i> Alimentar Pet';
+                    button.disabled = false;
+                }, 3000);
+            }
+        }
+
+        // Função para atualizar status
+        async function atualizarStatus() {
+            try {
+                const response = await fetch(`${FIREBASE_HOST}/pet_feeder.json?auth=${FIREBASE_AUTH}`, {
+                    method: 'GET',
+                    mode: 'cors'
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const data = await response.json();
+
+                if (data) {
+                    const nivel = data.nivel_racao || 'cheio';
+                    const pesoGramas = data.peso_gramas || 0;
+
+                    const levelFill = document.getElementById('levelFill');
+                    const levelText = document.getElementById('levelText');
+                    const distanceValue = document.getElementById('distanceValue');
+
+                    let percentage = 0;
+                    if (nivel === 'cheio') percentage = 80;
+                    else if (nivel === 'medio') percentage = 45;
+                    else percentage = 10;
+
+                    levelFill.style.height = percentage + '%';
+                    levelFill.className = 'level-fill ' + nivel;
+                    levelText.textContent = nivel.charAt(0).toUpperCase() + nivel.slice(1);
+                    distanceValue.textContent = Math.round(pesoGramas);
+
+                    document.getElementById('greenLed').classList.toggle('active', nivel === 'cheio');
+                    document.getElementById('yellowLed').classList.toggle('active', nivel === 'medio');
+                    document.getElementById('redLed').classList.toggle('active', nivel === 'vazio');
+
+                    document.getElementById('connectionStatus').className = 'connection-status online';
+                    document.getElementById('connectionStatus').innerHTML = '<i class="fas fa-wifi"></i> Online';
+                }
+            } catch (error) {
+                console.error('Erro ao buscar status:', error);
+                document.getElementById('connectionStatus').className = 'connection-status offline';
+                document.getElementById('connectionStatus').innerHTML = '<i class="fas fa-wifi-slash"></i> Offline';
+            }
+        }
+
+        // Função para carregar histórico
+        async function carregarHistorico() {
+            try {
+                const response = await fetch(`${FIREBASE_HOST}/pet_feeder/historico.json?auth=${FIREBASE_AUTH}`, {
+                    method: 'GET',
+                    mode: 'cors'
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const historico = await response.json();
+                const historyList = document.getElementById('historyList');
+                
+                if (historico && typeof historico === 'object') {
+                    historyList.innerHTML = '';
+                    
+                    // Converter objeto em array e ordenar por timestamp
+                    const items = Object.entries(historico).map(([key, value]) => ({
+                        key,
+                        ...value
+                    })).sort((a, b) => {
+                        // Função para converter timestamp brasileiro para Date
+                        const parseDate = (timestamp) => {
+                            if (!timestamp) return new Date(0);
+                            
+                            if (timestamp.includes('/')) {
+                                const parts = timestamp.split(' ');
+                                const dateParts = parts[0].split('/');
+                                const timeParts = parts[1] ? parts[1].split(':') : ['00', '00', '00'];
+                                
+                                return new Date(
+                                    dateParts[2],
+                                    dateParts[1] - 1,
+                                    dateParts[0],
+                                    timeParts[0],
+                                    timeParts[1],
+                                    timeParts[2]
+                                );
+                            }
+                            return new Date(timestamp);
+                        };
+                        
+                        const dateA = parseDate(a.timestamp);
+                        const dateB = parseDate(b.timestamp);
+                        return dateB - dateA;
+                    });
+
+                    items.forEach(item => {
+                        const div = document.createElement('div');
+                        div.className = 'history-item';
+                        
+                        // Tratar diferentes formatos de timestamp
+                        let timeStr = 'Data não disponível';
+                        if (item.timestamp) {
+                            // Tentar converter timestamp
+                            const timestamp = item.timestamp;
+                            
+                            // Se for formato DD/MM/YYYY HH:MM:SS
+                            if (timestamp.includes('/')) {
+                                const parts = timestamp.split(' ');
+                                const dateParts = parts[0].split('/');
+                                const timeParts = parts[1] ? parts[1].split(':') : ['00', '00', '00'];
+                                
+                                // Criar data no formato correto (YYYY-MM-DD)
+                                const date = new Date(
+                                    dateParts[2], // ano
+                                    dateParts[1] - 1, // mês (0-11)
+                                    dateParts[0], // dia
+                                    timeParts[0], // hora
+                                    timeParts[1], // minuto
+                                    timeParts[2] // segundo
+                                );
+                                
+                                if (!isNaN(date.getTime())) {
+                                    timeStr = date.toLocaleString('pt-BR');
+                                } else {
+                                    timeStr = timestamp; // Mostrar o timestamp original
+                                }
+                            } else {
+                                // Tentar formato ISO ou timestamp numérico
+                                const date = new Date(timestamp);
+                                if (!isNaN(date.getTime())) {
+                                    timeStr = date.toLocaleString('pt-BR');
+                                } else {
+                                    timeStr = timestamp;
+                                }
+                            }
+                        }
+                        
+                        div.innerHTML = `
+                            <div>
+                                <i class="fas fa-check-circle"></i>
+                                <strong>${item.evento || 'Alimentação'}</strong>
+                                <span class="time">${timeStr}</span>
+                            </div>
+                        `;
+                        historyList.appendChild(div);
+                    });
+                } else {
+                    historyList.innerHTML = '<div class="history-item"><i class="fas fa-info-circle"></i> Nenhum registro ainda</div>';
+                }
+            } catch (error) {
+                console.error('Erro ao carregar histórico:', error);
+            }
+        }
+
+        // Função para carregar agendamentos
+        async function carregarAgendamentos() {
+            try {
+                const response = await fetch(`${FIREBASE_HOST}/pet_feeder/agendamentos.json?auth=${FIREBASE_AUTH}`, {
+                    method: 'GET',
+                    mode: 'cors'
+                });
+
+                if (!response.ok) return;
+                
+                const agendamentos = await response.json();
+                const scheduleList = document.getElementById('scheduleList');
+                
+                if (agendamentos && typeof agendamentos === 'object' && Object.keys(agendamentos).length > 0) {
+                    scheduleList.innerHTML = '';
+                    
+                    Object.entries(agendamentos).forEach(([key, horario]) => {
+                        if (horario) {
+                            const div = document.createElement('div');
+                            div.className = 'schedule-item';
+                            div.innerHTML = `
+                                <span class="time"><i class="fas fa-clock"></i> ${horario}</span>
+                                <button class="delete-schedule-btn" onclick="removerAgendamento('${key}')">
+                                    <i class="fas fa-trash"></i>
+                                </button>
+                            `;
+                            scheduleList.appendChild(div);
+                        }
+                    });
+                } else {
+                    scheduleList.innerHTML = '<p style="text-align: center; color: #999;">Nenhum agendamento</p>';
+                }
+            } catch (error) {
+                console.error('Erro ao carregar agendamentos:', error);
+            }
+        }
+
+        // Função para adicionar agendamento
+        async function adicionarAgendamento() {
+            const timeInput = document.getElementById('scheduleTime');
+            const horario = timeInput.value;
+
+            if (!horario) {
+                alert('Por favor, selecione um horário!');
+                return;
+            }
+
+            try {
+                const response = await fetch(`${FIREBASE_HOST}/pet_feeder/agendamentos.json?auth=${FIREBASE_AUTH}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(horario),
+                    mode: 'cors'
+                });
+
+                if (response.ok) {
+                    timeInput.value = '';
+                    carregarAgendamentos();
+                }
+            } catch (error) {
+                console.error('Erro ao adicionar agendamento:', error);
+                alert('Erro ao adicionar agendamento!');
+            }
+        }
+
+        // Função para remover agendamento
+        async function removerAgendamento(key) {
+            try {
+                const response = await fetch(`${FIREBASE_HOST}/pet_feeder/agendamentos/${key}.json?auth=${FIREBASE_AUTH}`, {
+                    method: 'DELETE',
+                    mode: 'cors'
+                });
+
+                if (response.ok) {
+                    carregarAgendamentos();
+                }
+            } catch (error) {
+                console.error('Erro ao remover agendamento:', error);
+            }
+        }
+
+        // Atualizar tudo a cada 3 segundos
+        setInterval(() => {
+            atualizarStatus();
+            carregarHistorico();
+            carregarAgendamentos();
+        }, 3000);
+
+        // Primeira execução
+        atualizarStatus();
+        carregarHistorico();
+        carregarAgendamentos();
+    </script>
+</body>
+</html>
